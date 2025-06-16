@@ -33,12 +33,12 @@ fn new_reader<I: IntoIterator<Item = XmlRes>>(
     })))
 }
 
-pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> crate::Result<T> {
+fn from_bytes<'a, T: Deserialize<'a>>(bytes: &[u8], skip_root: bool) -> crate::Result<T> {
     let conf = xml::ParserConfig::new()
         .trim_whitespace(true)
         .whitespace_to_characters(true)
         .replace_unknown_entity_references(true);
-    let mut event_reader = xml::reader::EventReader::new_with_config(s.as_bytes(), conf);
+    let mut event_reader = xml::reader::EventReader::new_with_config(bytes, conf);
     match event_reader.next()? {
         xml::reader::XmlEvent::StartDocument {
             version,
@@ -57,7 +57,7 @@ pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> crate::Result<T> {
     let mut deserializer = Deserializer {
         reader: new_reader(event_reader),
         depth: 0,
-        is_map_value: false,
+        is_map_value: !skip_root,
         is_greedy: true,
         is_value: false,
         reset_peek_offset: 0,
@@ -66,37 +66,20 @@ pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> crate::Result<T> {
     Ok(t)
 }
 
+pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> crate::Result<T> {
+    from_bytes(s.as_bytes(), true)
+}
+
 pub fn from_string<'a, T: Deserialize<'a>>(s: String) -> crate::Result<T> {
-    let conf = xml::ParserConfig::new()
-        .trim_whitespace(true)
-        .whitespace_to_characters(true)
-        .replace_unknown_entity_references(true);
-    let mut event_reader = xml::reader::EventReader::new_with_config(s.as_bytes(), conf);
-    match event_reader.next()? {
-        xml::reader::XmlEvent::StartDocument {
-            version,
-            encoding,
-            standalone,
-        } => {
-            trace!(
-                "start_document({:?}, {:?}, {:?})",
-                version,
-                encoding,
-                standalone
-            );
-        }
-        _ => return Err(crate::Error::ExpectedElement),
-    }
-    let mut deserializer = Deserializer {
-        reader: new_reader(event_reader),
-        depth: 0,
-        is_map_value: false,
-        is_greedy: true,
-        is_value: false,
-        reset_peek_offset: 0,
-    };
-    let t = T::deserialize(&mut deserializer)?;
-    Ok(t)
+    from_bytes(s.as_bytes(), true)
+}
+
+pub fn from_str_with_root<'a, T: Deserialize<'a>>(s: &'a str) -> crate::Result<T> {
+    from_bytes(s.as_bytes(), false)
+}
+
+pub fn from_string_with_root<'a, T: Deserialize<'a>>(s: String) -> crate::Result<T> {
+    from_bytes(s.as_bytes(), false)
 }
 
 pub fn from_events<'a, T: Deserialize<'a>>(
@@ -1055,6 +1038,191 @@ mod tests {
             .unwrap(),
             Foo {
                 bar: "baz".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_root_into_struct() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Root {
+            text: String,
+        }
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root>
+    <Text>Text Value</Text>
+</Root>"#
+            )
+            .unwrap(),
+            Root {
+                text: String::from("Text Value")
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_root_into_enum() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        enum Root {
+            A(String),
+            B,
+            C(C),
+        }
+
+        #[derive(Debug, PartialEq, Deserialize)]
+        struct C {
+            #[serde(rename = "$value")]
+            inner: String,
+        }
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root>
+    <A>Text Value</A>
+</Root>"#
+            )
+            .unwrap(),
+            Root::A(String::from("Text Value"))
+        );
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root>
+    <B/>
+</Root>"#
+            )
+            .unwrap(),
+            Root::B
+        );
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root>
+    <C>Text Value</C>
+</Root>"#
+            )
+            .unwrap(),
+            Root::C(C {
+                inner: String::from("Text Value")
+            })
+        );
+    }
+
+    #[test]
+    fn complex_xml() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Root {
+            #[serde(rename = "$attr:Attr")]
+            attr: String,
+            elem: String,
+            #[serde(rename = "Choice")]
+            choices: Vec<Choice>,
+        }
+
+        #[derive(Debug, PartialEq, Deserialize)]
+        enum Choice {
+            A,
+            B(usize),
+            C(InnerC),
+        }
+
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct InnerC {
+            text: String,
+            id: usize,
+        }
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root Attr = "Attr Text">
+    <Elem>Elem Text</Elem>
+    <Choice><A/></Choice>
+    <Choice><B>123</B></Choice>
+    <Choice>
+        <C>
+            <Text>C Choice Text</Text>
+            <Id>321</Id>
+        </C>
+    </Choice>
+</Root>"#
+            )
+            .unwrap(),
+            Root {
+                attr: String::from("Attr Text"),
+                elem: String::from("Elem Text"),
+                choices: vec![
+                    Choice::A,
+                    Choice::B(123),
+                    Choice::C(InnerC {
+                        id: 321,
+                        text: String::from("C Choice Text")
+                    })
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn ns_test() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        struct Root {
+            #[serde(rename = "{urn:example.com:test}Text")]
+            text: String,
+            #[serde(rename = "{urn:example:test:two}rs:Namespace")]
+            namespace: String,
+        }
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root xmlns="urn:example.com:test" xmlns:rs="urn:example:test:two">
+    <Text>Test text</Text>
+    <rs:Namespace>Namespace text</rs:Namespace>
+</Root>
+            "#
+            )
+            .unwrap(),
+            Root {
+                text: String::from("Test text"),
+                namespace: String::from("Namespace text")
+            }
+        );
+    }
+
+    #[test]
+    fn ns_different_prefix_test() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        struct Root {
+            #[serde(rename = "{urn:example.com:test}Text")]
+            text: String,
+            #[serde(rename = "{urn:example:test:two}rs:Namespace")]
+            namespace: String,
+        }
+
+        assert_eq!(
+            crate::from_str_with_root::<Root>(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<Root xmlns="urn:example.com:test" xmlns:zz="urn:example:test:two">
+    <Text>Test text</Text>
+    <zz:Namespace>Namespace text</zz:Namespace>
+</Root>
+            "#
+            )
+            .unwrap(),
+            Root {
+                text: String::from("Test text"),
+                namespace: String::from("Namespace text")
             }
         );
     }
