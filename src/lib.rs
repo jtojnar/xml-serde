@@ -12,7 +12,9 @@ mod tag;
 
 pub(crate) use tag::Tag;
 
-pub use de::{from_events, from_str, from_string, Deserializer};
+pub use de::{
+    from_events, from_str, from_str_with_root, from_string, from_string_with_root, Deserializer,
+};
 pub use error::{Error, Result};
 pub use ser::{to_events, to_events_custom, to_string, to_string_custom, Options, Serializer};
 
