@@ -483,11 +483,23 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<_SerializerData, Self::Error> {
-        self.serialize_str(variant)
+        trace!("serialize_unit_variant(), name={name:?}, variant={variant:?}");
+        Ok(_SerializerData::Struct {
+            attrs: vec![],
+            contents: vec![(
+                Cow::from(variant),
+                _SerializerData::Struct {
+                    attrs: vec![],
+                    contents: vec![],
+                    name: None,
+                },
+            )],
+            name: self.should_include_name().then_some(name),
+        })
     }
 
     fn serialize_newtype_struct<T>(
@@ -807,5 +819,77 @@ mod tests {
             })
             .expect("test object should always serialize"),
         );
+    }
+
+    #[test]
+    fn serialize_enum_with_root() {
+        pretty_env_logger::init();
+
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Root {
+            value: MyEnum,
+        }
+
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        enum MyEnum {
+            A,
+            B(String),
+            C(InnerC),
+        }
+
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct InnerC {
+            text: String,
+            id: usize,
+        }
+
+        assert_eq!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Root>
+  <Value>
+    <A/>
+  </Value>
+</Root>"#
+                .to_string(),
+            super::to_string_with_root(&Root { value: MyEnum::A })
+                .expect("test object should always serialize"),
+        );
+
+        assert_eq!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Root>
+  <Value>
+    <B>Some text</B>
+  </Value>
+</Root>"#
+                .to_string(),
+            super::to_string_with_root(&Root {
+                value: MyEnum::B(String::from("Some text"))
+            })
+            .expect("test object should always serialize"),
+        );
+
+        assert_eq!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Root>
+  <Value>
+    <C>
+      <Text>Some Inner Text</Text>
+      <Id>123</Id>
+    </C>
+  </Value>
+</Root>"#
+                .to_string(),
+            super::to_string_with_root(&Root {
+                value: MyEnum::C(InnerC {
+                    id: 123,
+                    text: String::from("Some Inner Text")
+                })
+            })
+            .expect("test object should always serialize"),
+        )
     }
 }
