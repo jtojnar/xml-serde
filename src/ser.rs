@@ -233,6 +233,8 @@ fn format_data<W: EventWriter>(
     val: &_SerializerData,
     state: &mut _SerializerState,
 ) -> Result<(), crate::Error> {
+    trace!("format_data(); val={val:?}");
+
     match val {
         _SerializerData::CData(s) => {
             writer.write(xml::writer::XmlEvent::cdata(&match state.raw_output {
@@ -265,6 +267,7 @@ fn format_data<W: EventWriter>(
             }
 
             for (tag, d) in contents {
+                trace!("format_data(); tag={tag:?}, d={d:?}");
                 if *tag == "$valueRaw" {
                     let old_val = state.raw_output;
                     state.raw_output = true;
@@ -302,12 +305,16 @@ fn format_data<W: EventWriter>(
 }
 
 fn parse_tag<'a>(tag: &'a Cow<'static, str>) -> (Tag<'a>, String) {
+    trace!("parse_tag(); tag={tag:?}");
+
     let parsed_tag = Tag::from_cow(&tag);
     let base_name = parsed_tag.e;
     let name = match parsed_tag.p {
         Some(p) => format!("{}:{}", p, base_name),
         None => base_name.to_string(),
     };
+
+    trace!("parse_tag(); parsed_tag={parsed_tag:?}, name={name:?}");
     (parsed_tag, name)
 }
 
@@ -318,6 +325,7 @@ fn format_data_field<W: EventWriter>(
     name: &str,
     d: &_SerializerData,
 ) -> Result<(), crate::Error> {
+    trace!("format_data_field(), parsed_tag={parsed_tag:?}, name={name:?}, d={d:?}");
     let attrs = match d {
         _SerializerData::Struct { attrs, .. } => attrs,
         _ => [].as_slice(),
@@ -337,6 +345,8 @@ fn make_element<W: EventWriter>(
     name: &str,
     attrs: &[(Cow<'static, str>, String)],
 ) -> xml::writer::Result<bool> {
+    trace!("make_element(), parsed_tag={parsed_tag:?}, name={name:?}, attrs={attrs:?}");
+
     let attrs = attrs
         .iter()
         .map(|(attr_k, attr_v)| (xml::name::Name::from(Tag::from_cow(attr_k)), attr_v))
@@ -551,6 +561,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
+        trace!("serialize_struct(); name={name:?}");
         let is_root = self.should_include_name();
         Ok(StructSerializer {
             parent: self,
@@ -712,6 +723,7 @@ impl<'a> ser::SerializeStruct for StructSerializer<'a> {
     where
         T: ?Sized + Serialize,
     {
+        trace!("serialize_field(), name={:?}", self.name);
         let val = value.serialize(&mut *self.parent)?;
         if key.starts_with("$attr:") {
             self.attrs.push((&key[6..], val.as_str()));
@@ -769,6 +781,7 @@ impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
         })
     }
 }
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
