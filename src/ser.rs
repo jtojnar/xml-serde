@@ -800,7 +800,7 @@ mod tests {
 
     #[test]
     fn serialize_struct_with_root() {
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
 
         #[derive(Debug, PartialEq, Serialize)]
         #[serde(rename_all = "PascalCase")]
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn serialize_enum_with_root() {
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
 
         #[derive(Debug, PartialEq, Serialize, Deserialize)]
         #[serde(rename_all = "PascalCase")]
